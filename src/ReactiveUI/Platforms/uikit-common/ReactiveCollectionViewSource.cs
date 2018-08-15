@@ -112,7 +112,7 @@ namespace ReactiveUI
 
     /// <summary>
     /// ReactiveCollectionViewSource is a Collection View Source that is
-    /// connected to a ReactiveList that automatically updates the View based
+    /// connected to a Read Only List that automatically updates the View based
     /// on the contents of the list. The collection changes are buffered and
     /// View items are animated in and out as items are added.
     /// </summary>

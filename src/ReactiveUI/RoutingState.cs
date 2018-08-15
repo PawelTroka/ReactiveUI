@@ -1,13 +1,15 @@
-// Licensed to the .NET Foundation under one or more agreements.
+﻿// Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 // See the LICENSE file in the project root for more information.
 
 using System;
+using System.Collections.ObjectModel;
 using System.Linq;
 using System.Reactive;
 using System.Reactive.Concurrency;
 using System.Reactive.Linq;
 using System.Runtime.Serialization;
+using DynamicData.Binding;
 
 namespace ReactiveUI
 {
@@ -23,16 +25,17 @@ namespace ReactiveUI
             RxApp.EnsureInitialized();
         }
 
-        [DataMember] ReactiveList<IRoutableViewModel> _NavigationStack;
+        [DataMember]
+        private ObservableCollectionExtended<IRoutableViewModel> _navigationStack;
 
         /// <summary>
         /// Represents the current navigation stack, the last element in the
         /// collection being the currently visible ViewModel.
         /// </summary>
         [IgnoreDataMember]
-        public ReactiveList<IRoutableViewModel> NavigationStack {
-            get { return _NavigationStack; }
-            protected set { _NavigationStack = value; }
+        public ReadOnlyObservableCollection<IRoutableViewModel> NavigationStack {
+            get { return _navigationStack; }
+            protected set { _navigationStack = value; }
         }
 
         [IgnoreDataMember]
@@ -79,7 +82,7 @@ namespace ReactiveUI
 
         public RoutingState()
         {
-            _NavigationStack = new ReactiveList<IRoutableViewModel>();
+            _navigationStack = new ObservableCollectionExtended<IRoutableViewModel>();
             setupRx();
         }
 
@@ -90,9 +93,11 @@ namespace ReactiveUI
         {
             var scheduler = this.scheduler ?? RxApp.MainThreadScheduler;
 
+            var changeSetObservable = _navigationStack.ToObservableChangeSet();
+
             var countAsBehavior = Observable.Concat(
-                Observable.Defer(() => Observable.Return(_NavigationStack.Count)),
-                NavigationStack.CountChanged);
+                Observable.Defer(() => Observable.Return(_navigationStack.Count)),
+                changeSetObservable.);
 
             NavigateBack = 
                 ReactiveCommand.CreateFromObservable(() => {
