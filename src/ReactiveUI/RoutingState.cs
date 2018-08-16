@@ -26,7 +26,10 @@ namespace ReactiveUI
         }
 
         [DataMember]
-        private ObservableCollectionExtended<IRoutableViewModel> _navigationStack;
+        private readonly ObservableCollectionExtended<IRoutableViewModel> _navigationStack;
+
+        [IgnoreDataMember]
+        private readonly ReadOnlyObservableCollection<IRoutableViewModel> _navigationStackReadOnly;
 
         /// <summary>
         /// Represents the current navigation stack, the last element in the
@@ -34,8 +37,7 @@ namespace ReactiveUI
         /// </summary>
         [IgnoreDataMember]
         public ReadOnlyObservableCollection<IRoutableViewModel> NavigationStack {
-            get { return _navigationStack; }
-            protected set { _navigationStack = value; }
+            get { return _navigationStackReadOnly; }
         }
 
         [IgnoreDataMember]
@@ -46,11 +48,11 @@ namespace ReactiveUI
         /// </summary>
         [IgnoreDataMember]
         public IScheduler Scheduler {
-            get { return this.scheduler; }
+            get { return scheduler; }
             set {
-                if (this.scheduler != value) {
-                    this.scheduler = value;
-                    this.setupRx();
+                if (scheduler != value) {
+                    scheduler = value;
+                    setupRx();
                 }
             }
         }
@@ -83,6 +85,7 @@ namespace ReactiveUI
         public RoutingState()
         {
             _navigationStack = new ObservableCollectionExtended<IRoutableViewModel>();
+            _navigationStackReadOnly = new ReadOnlyObservableCollection<IRoutableViewModel>(_navigationStack);
             setupRx();
         }
 
@@ -97,11 +100,11 @@ namespace ReactiveUI
 
             var countAsBehavior = Observable.Concat(
                 Observable.Defer(() => Observable.Return(_navigationStack.Count)),
-                changeSetObservable.);
+                changeSetObservable.Select(x => x.Count));
 
             NavigateBack = 
                 ReactiveCommand.CreateFromObservable(() => {
-                    NavigationStack.RemoveAt(NavigationStack.Count - 1);
+                    _navigationStack.RemoveAt(NavigationStack.Count - 1);
                     return Observables.Unit;
                 },
                 countAsBehavior.Select(x => x > 1),
@@ -113,20 +116,20 @@ namespace ReactiveUI
                     throw new Exception("Navigate must be called on an IRoutableViewModel");
                 }
 
-                NavigationStack.Add(vm);
+                _navigationStack.Add(vm);
                 return Observable.Return(x);
             },
             outputScheduler: scheduler);
 
             NavigateAndReset = ReactiveCommand.CreateFromObservable<IRoutableViewModel, IRoutableViewModel>(x => {
-                NavigationStack.Clear();
+                _navigationStack.Clear();
                 return Navigate.Execute(x);
             },
             outputScheduler: scheduler);
             
             CurrentViewModel = Observable.Concat(
                 Observable.Defer(() => Observable.Return(NavigationStack.LastOrDefault())),
-                NavigationStack.Changed.Select(_ => NavigationStack.LastOrDefault()));
+                changeSetObservable.Select(_ => NavigationStack.LastOrDefault()));
         }
     }
 
