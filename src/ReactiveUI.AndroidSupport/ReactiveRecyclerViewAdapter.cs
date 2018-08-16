@@ -1,4 +1,4 @@
-// Licensed to the .NET Foundation under one or more agreements.
+﻿// Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 // See the LICENSE file in the project root for more information.
 
@@ -13,6 +13,8 @@ using System.Runtime.Serialization;
 using System.Threading;
 using Android.Support.V7.Widget;
 using Android.Views;
+using DynamicData;
+using DynamicData.Binding;
 
 namespace ReactiveUI.Android.Support
 {
@@ -26,28 +28,69 @@ namespace ReactiveUI.Android.Support
     public abstract class ReactiveRecyclerViewAdapter<TViewModel> : RecyclerView.Adapter 
         where TViewModel : class, IReactiveObject
     {
-        readonly IReadOnlyReactiveList<TViewModel> list;
+        readonly IObservableList<TViewModel> list;
 
-        IDisposable _inner;
+        IDisposable inner;
 
-        protected ReactiveRecyclerViewAdapter(IReadOnlyReactiveList<TViewModel> backingList)
+        protected ReactiveRecyclerViewAdapter(IObservableList<TViewModel> backingList)
         {
             this.list = backingList;
 
-            _inner = this.list.Changed.Subscribe(_ => NotifyDataSetChanged()); 
+            this.inner = this
+                .list
+                .Connect()
+                .ForEachChange(change => UpdateBindings(change))
+                .Subscribe();
+        }
+
+        protected ReactiveRecyclerViewAdapter(IReadOnlyReactiveList<TViewModel> backingList)
+        {
+            var observableChangeSet = backingList.ToObservableChangeSet<IReadOnlyReactiveList<TViewModel>, TViewModel>();
+            this.list = observableChangeSet.AsObservableList();
+
+            this.inner = observableChangeSet
+                .ForEachChange(change => UpdateBindings(change))
+                .Subscribe();
         }
 
         public override void OnBindViewHolder(RecyclerView.ViewHolder holder, int position)
         {
-            ((IViewFor)holder).ViewModel = list[position];
+            ((IViewFor)holder).ViewModel = this.list.Items.ElementAt(position);
         }
 
-        public override int ItemCount { get { return list.Count; } }
+        public override int ItemCount { get { return this.list.Count; } }
 
         protected override void Dispose(bool disposing)
         {
             base.Dispose(disposing);
-            Interlocked.Exchange(ref _inner, Disposable.Empty).Dispose();
+            Interlocked.Exchange(ref this.inner, Disposable.Empty).Dispose();
+        }
+
+        private void UpdateBindings(Change<TViewModel> change)
+        {
+            switch(change.Reason)
+            {
+                case ListChangeReason.Add:
+                    NotifyItemInserted(change.Item.CurrentIndex);
+                    break;
+                case ListChangeReason.Remove:
+                    NotifyItemRemoved(change.Item.CurrentIndex);
+                    break;
+                case ListChangeReason.Moved:
+                    NotifyItemMoved(change.Item.PreviousIndex, change.Item.CurrentIndex);
+                    break;
+                case ListChangeReason.Replace:
+                case ListChangeReason.Refresh:
+                    NotifyItemChanged(change.Item.CurrentIndex);
+                    break;
+                case ListChangeReason.AddRange:
+                    NotifyItemRangeInserted(change.Range.Index, change.Range.Count);
+                    break;
+                case ListChangeReason.RemoveRange:
+                case ListChangeReason.Clear:
+                    NotifyItemRangeRemoved(change.Range.Index, change.Range.Count);
+                    break;
+            }
         }
     }
 
