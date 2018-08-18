@@ -43,16 +43,6 @@ namespace ReactiveUI.Android.Support
                 .Subscribe();
         }
 
-        protected ReactiveRecyclerViewAdapter(IReadOnlyReactiveList<TViewModel> backingList)
-        {
-            var observableChangeSet = backingList.ToObservableChangeSet<IReadOnlyReactiveList<TViewModel>, TViewModel>();
-            this.list = observableChangeSet.AsObservableList();
-
-            this.inner = observableChangeSet
-                .ForEachChange(change => UpdateBindings(change))
-                .Subscribe();
-        }
-
         public override void OnBindViewHolder(RecyclerView.ViewHolder holder, int position)
         {
             ((IViewFor)holder).ViewModel = this.list.Items.ElementAt(position);

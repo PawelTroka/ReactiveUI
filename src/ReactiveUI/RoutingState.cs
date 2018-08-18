@@ -28,16 +28,13 @@ namespace ReactiveUI
         [DataMember]
         private readonly ObservableCollectionExtended<IRoutableViewModel> _navigationStack;
 
-        [IgnoreDataMember]
-        private readonly ReadOnlyObservableCollection<IRoutableViewModel> _navigationStackReadOnly;
-
         /// <summary>
         /// Represents the current navigation stack, the last element in the
         /// collection being the currently visible ViewModel.
         /// </summary>
         [IgnoreDataMember]
-        public ReadOnlyObservableCollection<IRoutableViewModel> NavigationStack {
-            get { return _navigationStackReadOnly; }
+        public ObservableCollectionExtended<IRoutableViewModel> NavigationStack {
+            get { return _navigationStack; }
         }
 
         [IgnoreDataMember]
@@ -85,7 +82,6 @@ namespace ReactiveUI
         public RoutingState()
         {
             _navigationStack = new ObservableCollectionExtended<IRoutableViewModel>();
-            _navigationStackReadOnly = new ReadOnlyObservableCollection<IRoutableViewModel>(_navigationStack);
             setupRx();
         }
 

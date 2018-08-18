@@ -8,7 +8,7 @@ using System.Collections;
 using System.Collections.Specialized;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
-using ReactiveUI;
+using ReactiveUI.Legacy;
 
 namespace ReactiveUI.Winforms.Legacy
 {

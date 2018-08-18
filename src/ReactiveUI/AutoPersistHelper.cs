@@ -21,13 +21,12 @@ namespace ReactiveUI
 {
     public static class AutoPersistHelper
     {
-        static MemoizingMRUCache<Type, Dictionary<string, bool>> persistablePropertiesCache = new MemoizingMRUCache<Type, Dictionary<string, bool>>((type, _) => {
+        private static MemoizingMRUCache<Type, Dictionary<string, bool>> persistablePropertiesCache = new MemoizingMRUCache<Type, Dictionary<string, bool>>((type, _) => {
             return type.GetTypeInfo().DeclaredProperties
                 .Where(x => x.CustomAttributes.Any(y => typeof(DataMemberAttribute).GetTypeInfo().IsAssignableFrom(y.AttributeType.GetTypeInfo())))
                 .ToDictionary(k => k.Name, v => true);
         }, RxApp.SmallCacheLimit);
-
-        static MemoizingMRUCache<Type, bool> dataContractCheckCache = new MemoizingMRUCache<Type, bool>((t, _) => {
+        private static MemoizingMRUCache<Type, bool> dataContractCheckCache = new MemoizingMRUCache<Type, bool>((t, _) => {
             return t.GetTypeInfo().GetCustomAttributes(typeof(DataContractAttribute), true).Any();
         }, RxApp.SmallCacheLimit);
 
@@ -105,7 +104,10 @@ namespace ReactiveUI
             // from triggering a save
             var ret = new SingleAssignmentDisposable();
             RxApp.MainThreadScheduler.Schedule(() => {
-                if (ret.IsDisposed) return;
+                if (ret.IsDisposed) {
+                    return;
+                }
+
                 ret.Disposable = autoSaver.Connect();
             });
 
@@ -127,9 +129,8 @@ namespace ReactiveUI
         /// it is possible that it will never be saved.
         /// </param>
         /// <returns>A Disposable to disable automatic persistence.</returns>
-        public static IDisposable AutoPersistCollection<TItem, TCollection>(this TCollection This, Func<TItem, IObservable<Unit>> doPersist, TimeSpan? interval = null)
+        public static IDisposable AutoPersistCollection<TItem>(this IEnumerable<TItem> This, Func<TItem, IObservable<Unit>> doPersist, TimeSpan? interval = null)
             where TItem : IReactiveObject
-            where TCollection : INotifyCollectionChanged, IEnumerable<TItem>
         {
             return AutoPersistCollection(This, doPersist, Observable<Unit>.Never, interval);
         }
@@ -152,15 +153,17 @@ namespace ReactiveUI
         /// it is possible that it will never be saved.
         /// </param>
         /// <returns>A Disposable to disable automatic persistence.</returns>
-        public static IDisposable AutoPersistCollection<TItem, TCollection, TDontCare>(this TCollection This, Func<TItem, IObservable<Unit>> doPersist, IObservable<TDontCare> manualSaveSignal, TimeSpan? interval = null)
+        public static IDisposable AutoPersistCollection<TItem, TDontCare>(this IEnumerable<TItem> This, Func<TItem, IObservable<Unit>> doPersist, IObservable<TDontCare> manualSaveSignal, TimeSpan? interval = null)
             where TItem : IReactiveObject
-            where TCollection : INotifyCollectionChanged, IEnumerable<TItem>
         {
             var disposerList = new Dictionary<TItem, IDisposable>();
 
-            var disp = This.ActOnEveryObject<TItem, TCollection>(
+            var disp = This.ActOnEveryObject<TItem>(
                 x => {
-                    if (disposerList.ContainsKey(x)) return;
+                    if (disposerList.ContainsKey(x)) {
+                        return;
+                    }
+
                     disposerList[x] = x.AutoPersist(doPersist, manualSaveSignal, interval);
                 },
                 x => {
@@ -189,81 +192,41 @@ namespace ReactiveUI
         /// A method to be called when an object is removed from the collection.
         /// </param>
         /// <returns>A Disposable that deactivates this behavior.</returns>
-        public static IDisposable ActOnEveryObject<TItem, TCollection>(this TCollection This, Action<TItem> onAdd, Action<TItem> onRemove)
-            where TItem : IReactiveObject
-            where TCollection : INotifyCollectionChanged, IEnumerable<TItem>
+        public static IDisposable ActOnEveryObject<T>(this IEnumerable<T> This, Action<T> onAdd, Action<T> onRemove)
+            where T : IReactiveObject
         {
             foreach (var v in This) { onAdd(v); }
 
-            var changedDisposable = ActOnEveryObject(This.ToObservableChangeSet<TCollection, TItem>(), onAdd, onRemove);
+            if (!(This is INotifyCollectionChanged notifyCollectionChanged)) {
+                LogHost.Default.Warn("[#{0}] ActOnEveryObject collection does not implement INotifyCollectionChanged - any added or removed items will not be acted on.",  This.GetType().FullName);
+                return Disposable.Empty;
+            }
+
+            var changedDisposable = notifyCollectionChanged.ObserveCollectionChanges().Subscribe(x => {
+                switch (x.EventArgs.Action) {
+                    case NotifyCollectionChangedAction.Add:
+                        foreach (T v in x.EventArgs.NewItems) { onAdd(v); }
+                        break;
+                    case NotifyCollectionChangedAction.Replace:
+                        foreach (T v in x.EventArgs.OldItems) { onRemove(v); }
+                        foreach (T v in x.EventArgs.NewItems) { onAdd(v); }
+                        break;
+                    case NotifyCollectionChangedAction.Remove:
+                        foreach (T v in x.EventArgs.OldItems) { onRemove(v); }
+                        break;
+                    case NotifyCollectionChangedAction.Reset:
+                        foreach (T v in This) { onAdd(v); }
+                        break;
+                    default:
+                        break;
+                }
+            });
 
             return Disposable.Create(() => {
                 changedDisposable.Dispose();
 
                 This.ForEach(x => onRemove(x));
             });
-        }
-
-        /// <summary>
-        /// Call methods 'onAdd' and 'onRemove' whenever an object is added or
-        /// removed from a collection. This class correctly handles both when
-        /// a collection is initialized, as well as when the collection is Reset.
-        /// </summary>
-        /// <param name="This">
-        /// The reactive collection to watch for changes
-        /// </param>
-        /// <param name="onAdd">
-        /// A method to be called when an object is added to the collection.
-        /// </param>
-        /// <param name="onRemove">
-        /// A method to be called when an object is removed from the collection.
-        /// </param>
-        /// <returns>A Disposable that deactivates this behavior.</returns>
-        public static IDisposable ActOnEveryObject<TItem>(this IObservable<IChangeSet<TItem>> This, Action<TItem> onAdd, Action<TItem> onRemove)
-            where TItem : IReactiveObject
-        {
-            var changedDisp = This
-                .Subscribe(
-                    x => {
-                        foreach (var change in x) {
-                            switch (change.Reason) {
-                                case ListChangeReason.Add:
-                                    onAdd(change.Item.Current);
-                                    break;
-                                case ListChangeReason.AddRange:
-                                    foreach (var item in change.Range) { onAdd(item); }
-                                    break;
-                                case ListChangeReason.Clear:
-                                case ListChangeReason.Refresh:
-                                    foreach (var item in change.Range) { onRemove(item); }
-                                    break;
-
-
-                            }
-                        }
-                    });
-
-            //var changedDisp = This.Changed.Subscribe(x => {
-            //    switch (x.Action) {
-            //        case NotifyCollectionChangedAction.Add:
-            //            foreach (T v in x.NewItems) { onAdd(v); }
-            //            break;
-            //        case NotifyCollectionChangedAction.Replace:
-            //            foreach (T v in x.OldItems) { onRemove(v); }
-            //            foreach (T v in x.NewItems) { onAdd(v); }
-            //            break;
-            //        case NotifyCollectionChangedAction.Remove:
-            //            foreach (T v in x.OldItems) { onRemove(v); }
-            //            break;
-            //        case NotifyCollectionChangedAction.Reset:
-            //            foreach (T v in This) { onAdd(v); }
-            //            break;
-            //        default:
-            //            break;
-            //    }
-            //});
-
-            return changedDisp;
         }
     }
 }
